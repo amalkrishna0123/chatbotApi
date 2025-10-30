@@ -29,7 +29,8 @@ from .models import ChatSession, ChatMessage
 from .ocr_space import ocr_space_file
 
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key="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")
+
 SERVICE_ACCOUNT_FILE = r"C:\Users\GL_Amal\OneDrive\Desktop\AMAL KRISHNA\ChatBot - Copy\chatbot_project\backend\chatbot.json"
 
 
@@ -93,8 +94,18 @@ INSURANCE_ONBOARDING_SYSTEM_PROMPT = (
     "Assistant output:\n"
     "{\n"
     "  \"reply\": \"What is your monthly salary?\",\n"
-    "  \"options\": [\"Below 4000 AED\", \"4000-10000 AED\", \"More than 10000 AED\"],\n"
+    "  \"options\": [\"below 4000 AED\", \"4000 - 5000 AED\", \"above 5000 AED\"],\n"
     "  \"session_updates\": {\"role\": \"Employee\", \"step\": \"salary_q\"},\n"
+    "  \"complete\": false\n"
+    "}\n\n"
+
+    "User input:\n"
+    "{\"context\":{\"step\":\"q2\"},\"last_user_message\":\"Depender\"}\n"
+    "Assistant output:\n"
+    "{\n"
+    "  \"reply\": \"What type of Depender are you?\",\n"
+    "  \"options\": [\"Spouse\", \"Child\"],\n"
+    "  \"session_updates\": {\"role\": \"Depender\", \"step\": \"q2a\"},\n"
     "  \"complete\": false\n"
     "}\n\n"
 
@@ -468,6 +479,199 @@ def parse_fields(text):
 
 
 # views.py - Replace the emirates_id_upload function
+# @csrf_exempt
+# @require_POST
+# def emirates_id_upload(request):
+#     """
+#     Multi-file front/back upload using OCR.space.
+#     Handles multiple files in one upload, auto-detects front/back sides,
+#     merges extracted data into one EmiratesIDRecord,
+#     and syncs extracted fields with ChatSession.
+#     """
+#     from .ocr_space import ocr_space_file_multi_lang, detect_document_side
+    
+#     session_id = request.POST.get("session_id")
+#     if not session_id:
+#         return JsonResponse({"error": "session_id required"}, status=400)
+
+#     try:
+#         session = ChatSession.objects.get(session_id=session_id)
+#     except ChatSession.DoesNotExist:
+#         return JsonResponse({"error": "Chat session not found"}, status=404)
+
+#     # Collect all uploaded files
+#     files = request.FILES.getlist("file")
+#     if not files:
+#         return JsonResponse({"error": "No files received"}, status=400)
+
+#     # Process each file with OCR.space
+#     processed_files = []
+#     for file_obj in files:
+#         is_pdf = file_obj.name.lower().endswith(".pdf")
+        
+#         # Use the improved multi-language OCR function
+#         text, code, err = ocr_space_file_multi_lang(file_obj, is_pdf)
+#         if code != 0:
+#             return JsonResponse({"error": f"OCR.space failed for {file_obj.name}: {err}"}, status=500)
+        
+#         # Detect document side
+#         side = detect_document_side(text)
+        
+#         processed_files.append({
+#             'name': file_obj.name,
+#             'text': text,
+#             'side': side,
+#             'is_pdf': is_pdf
+#         })
+
+#     # Separate front and back side text
+#     front_texts = [f['text'] for f in processed_files if f['side'] in ['front', 'unknown']]
+#     back_texts = [f['text'] for f in processed_files if f['side'] == 'back']
+    
+#     # Combine texts
+#     front_combined = " ".join(front_texts) if front_texts else ""
+#     back_combined = " ".join(back_texts) if back_texts else ""
+    
+#     # If no clear side detection, use heuristics
+#     if not front_combined and back_combined:
+#         front_combined = back_combined
+#     elif not back_combined and front_combined:
+#         back_combined = ""
+
+#     # Parse fields from combined text
+#     front_data = parse_fields(front_combined)
+#     back_data = parse_back_side_fields(back_combined)
+    
+#     # Handle family sponsor follow-up
+#     family_sponsor_name = None
+#     if back_data.get("family_sponsor") == "Yes":
+#         name_match = re.search(r'(?:family sponsor name|اسم الكفيل|كفيل)\s*[:\-]?\s*([^\n\r]{2,80})', 
+#                              back_combined, re.IGNORECASE)
+#         if name_match:
+#             family_sponsor_name = name_match.group(1).strip()
+
+#     # Get or create EmiratesIDRecord
+#     record, created = EmiratesIDRecord.objects.get_or_create(
+#         chat_session=session,
+#         defaults={
+#             "emirates_id": front_data.get("emirates_id"),
+#             "name": front_data.get("name"),
+#             "dob": front_data.get("dob"),
+#             "nationality": front_data.get("nationality"),
+#             "gender": front_data.get("gender"),
+#             "address": front_data.get("address"),
+#             "issuing_date": front_data.get("issuing_date"),
+#             "expiry_date": front_data.get("expiry_date"),
+#             "occupation": back_data.get("occupation"),
+#             "employer": back_data.get("employer"),
+#             "issuing_place": back_data.get("issuing_place"),
+#             "family_sponsor": back_data.get("family_sponsor"),
+#             "family_sponsor_name": family_sponsor_name,
+#             "raw_response": {
+#                 "front_text": front_combined[:2000],
+#                 "back_text": back_combined[:2000],
+#                 "processed_files": [f['name'] for f in processed_files]
+#             }
+#         }
+#     )
+    
+#     if not created:
+#         # Update existing record
+#         update_fields = []
+#         for field, value in {**front_data, **back_data}.items():
+#             if hasattr(record, field) and value:
+#                 setattr(record, field, value)
+#                 update_fields.append(field)
+        
+#         if family_sponsor_name:
+#             record.family_sponsor_name = family_sponsor_name
+#             update_fields.append('family_sponsor_name')
+            
+#         if update_fields:
+#             record.save(update_fields=update_fields)
+
+#     # ✅ Sync extracted fields into ChatSession
+#     if record:
+#         update_fields = []
+        
+#         if record.name and not session.full_name:
+#             session.full_name = record.name
+#             update_fields.append('full_name')
+        
+#         if record.emirates_id and not session.emirates_id_number:
+#             session.emirates_id_number = record.emirates_id
+#             update_fields.append('emirates_id_number')
+        
+#         if record.dob and not session.dob:
+#             session.dob = record.dob
+#             update_fields.append('dob')
+        
+#         if record.expiry_date and not session.expiry:
+#             session.expiry = record.expiry_date
+#             update_fields.append('expiry')
+        
+#         if record.nationality and not session.nationality:
+#             session.nationality = record.nationality
+#             update_fields.append('nationality')
+        
+#         if record.occupation and not session.occupation:
+#             session.occupation = record.occupation
+#             update_fields.append('occupation')
+        
+#         session.emirates_id_uploaded = True
+#         update_fields.append('emirates_id_uploaded')
+        
+#         if update_fields:
+#             session.save(update_fields=update_fields)
+
+#     # Compute missing fields
+#     expected_front = [
+#         "emirates_id", "name", "dob", "nationality", "gender", 
+#         "address", "issuing_date", "expiry_date"
+#     ]
+#     expected_back = [
+#         "occupation", "employer", "issuing_place", "family_sponsor"
+#     ]
+    
+#     missing = []
+#     for field in expected_front:
+#         if not getattr(record, field, None):
+#             missing.append(field)
+    
+#     for field in expected_back:
+#         if not getattr(record, field, None):
+#             missing.append(field)
+    
+#     if record.family_sponsor == "Yes" and not record.family_sponsor_name:
+#         missing.append("family_sponsor_name")
+
+#     # Determine next step
+#     has_back_side = any(f['side'] == 'back' for f in processed_files)
+#     next_step = "complete" if has_back_side else "awaiting_id_backside"
+    
+#     if has_back_side and session.step in ["awaiting_id_frontside", "awaiting_id_backside"]:
+#         session.step = "complete"
+#         session.save()
+
+#     return JsonResponse({
+#         "ok": True,
+#         "id": record.id,
+#         "fields": {**front_data, **back_data},
+#         "missing_fields": missing,
+#         "sides_detected": {
+#             "front": bool(front_texts),
+#             "back": bool(back_texts)
+#         },
+#         "next_step": next_step,
+#         "files_processed": len(processed_files)
+#     })
+
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+import re
+
 @csrf_exempt
 @require_POST
 def emirates_id_upload(request):
@@ -478,7 +682,7 @@ def emirates_id_upload(request):
     and syncs extracted fields with ChatSession.
     """
     from .ocr_space import ocr_space_file_multi_lang, detect_document_side
-    
+
     session_id = request.POST.get("session_id")
     if not session_id:
         return JsonResponse({"error": "session_id required"}, status=400)
@@ -497,15 +701,15 @@ def emirates_id_upload(request):
     processed_files = []
     for file_obj in files:
         is_pdf = file_obj.name.lower().endswith(".pdf")
-        
+
         # Use the improved multi-language OCR function
         text, code, err = ocr_space_file_multi_lang(file_obj, is_pdf)
         if code != 0:
             return JsonResponse({"error": f"OCR.space failed for {file_obj.name}: {err}"}, status=500)
-        
+
         # Detect document side
         side = detect_document_side(text)
-        
+
         processed_files.append({
             'name': file_obj.name,
             'text': text,
@@ -516,11 +720,11 @@ def emirates_id_upload(request):
     # Separate front and back side text
     front_texts = [f['text'] for f in processed_files if f['side'] in ['front', 'unknown']]
     back_texts = [f['text'] for f in processed_files if f['side'] == 'back']
-    
+
     # Combine texts
     front_combined = " ".join(front_texts) if front_texts else ""
     back_combined = " ".join(back_texts) if back_texts else ""
-    
+
     # If no clear side detection, use heuristics
     if not front_combined and back_combined:
         front_combined = back_combined
@@ -530,12 +734,12 @@ def emirates_id_upload(request):
     # Parse fields from combined text
     front_data = parse_fields(front_combined)
     back_data = parse_back_side_fields(back_combined)
-    
+
     # Handle family sponsor follow-up
     family_sponsor_name = None
     if back_data.get("family_sponsor") == "Yes":
-        name_match = re.search(r'(?:family sponsor name|اسم الكفيل|كفيل)\s*[:\-]?\s*([^\n\r]{2,80})', 
-                             back_combined, re.IGNORECASE)
+        name_match = re.search(r'(?:family sponsor name|اسم الكفيل|كفيل)\s*[:\-]?\s*([^\n\r]{2,80})',
+                               back_combined, re.IGNORECASE)
         if name_match:
             family_sponsor_name = name_match.group(1).strip()
 
@@ -563,7 +767,7 @@ def emirates_id_upload(request):
             }
         }
     )
-    
+
     if not created:
         # Update existing record
         update_fields = []
@@ -571,78 +775,214 @@ def emirates_id_upload(request):
             if hasattr(record, field) and value:
                 setattr(record, field, value)
                 update_fields.append(field)
-        
+
         if family_sponsor_name:
             record.family_sponsor_name = family_sponsor_name
             update_fields.append('family_sponsor_name')
-            
+
         if update_fields:
             record.save(update_fields=update_fields)
 
     # ✅ Sync extracted fields into ChatSession
     if record:
         update_fields = []
-        
+
         if record.name and not session.full_name:
             session.full_name = record.name
             update_fields.append('full_name')
-        
+
         if record.emirates_id and not session.emirates_id_number:
             session.emirates_id_number = record.emirates_id
             update_fields.append('emirates_id_number')
-        
+
         if record.dob and not session.dob:
             session.dob = record.dob
             update_fields.append('dob')
-        
+
         if record.expiry_date and not session.expiry:
             session.expiry = record.expiry_date
             update_fields.append('expiry')
-        
+
         if record.nationality and not session.nationality:
             session.nationality = record.nationality
             update_fields.append('nationality')
-        
+
         if record.occupation and not session.occupation:
             session.occupation = record.occupation
             update_fields.append('occupation')
-        
+
         session.emirates_id_uploaded = True
         update_fields.append('emirates_id_uploaded')
-        
+
         if update_fields:
             session.save(update_fields=update_fields)
 
     # Compute missing fields
     expected_front = [
-        "emirates_id", "name", "dob", "nationality", "gender", 
+        "emirates_id", "name", "dob", "nationality", "gender",
         "address", "issuing_date", "expiry_date"
     ]
     expected_back = [
-        "occupation", "employer", "issuing_place", "family_sponsor"
+        "occupation", "employer", "issuing_place"
     ]
-    
-    missing = []
-    for field in expected_front:
-        if not getattr(record, field, None):
-            missing.append(field)
-    
-    for field in expected_back:
-        if not getattr(record, field, None):
-            missing.append(field)
-    
+
+    # missing = [
+    #     field for field in expected_front + expected_back
+    #     if not getattr(record, field, None)
+    # ]
+    # if record.family_sponsor == "Yes" and not record.family_sponsor_name:
+    #     missing.append("family_sponsor_name")
+
+    # for field in expected_front:
+    #     if not getattr(record, field, None):
+    #         missing.append(field)
+
+    # for field in expected_back:
+    #     if not getattr(record, field, None):
+    #         missing.append(field)
+
+    # if record.family_sponsor == "Yes" and not record.family_sponsor_name:
+    #     missing.append("family_sponsor_name")
+
+    missing = [
+        field for field in expected_front + expected_back
+        if not getattr(record, field, None)
+    ]
     if record.family_sponsor == "Yes" and not record.family_sponsor_name:
         missing.append("family_sponsor_name")
 
+
     # Determine next step
     has_back_side = any(f['side'] == 'back' for f in processed_files)
-    next_step = "complete" if has_back_side else "awaiting_id_backside"
-    
+    next_step = "complete" 
+
     if has_back_side and session.step in ["awaiting_id_frontside", "awaiting_id_backside"]:
         session.step = "complete"
         session.save()
 
-    return JsonResponse({
+    # ✅ Use the new helper function here
+    products, message = compute_products_based_on_data(session, record)
+
+    # Normalize issuing place (robust to common OCR errors)
+    issuing_raw = (record.issuing_place or "") if record else ""
+    issuing_norm = issuing_raw.strip().lower()
+
+    # canonicalize common OCR variations
+    place = None
+    if issuing_norm:
+        # Abu Dhabi has many OCR variants like 'abu', 'abu dabhi', 'abudhabi', etc.
+        if ("abu" in issuing_norm and "dub" not in issuing_norm) or "adhabi" in issuing_norm or "adabi" in issuing_norm or "abudhabi" in issuing_norm or "abud" in issuing_norm:
+            place = "Abu Dhabi"
+        elif "duba" in issuing_norm or "dubai" in issuing_norm or "dubi" in issuing_norm:
+            place = "Dubai"
+        else:
+            # fallback: exact words
+            if "abu dhabi" in issuing_norm:
+                place = "Abu Dhabi"
+            elif "dubai" in issuing_norm:
+                place = "Dubai"
+            else:
+                place = issuing_raw.strip().title() if issuing_raw else None
+
+    # Normalize salary selection from session
+    salary_raw = (session.salary or "").lower() if session else ""
+    salary_key = None
+
+    # look for the canonical options user should have selected:
+    # "below 4000 AED", "4000 - 5000 AED", "above 5000 AED"
+    if "below" in salary_raw and "4000" in salary_raw:
+        salary_key = "below_4000"
+    elif "4000" in salary_raw and "5000" in salary_raw:
+        salary_key = "4000_5000"
+    elif "above" in salary_raw and ("5000" in salary_raw or "5000" in salary_raw):
+        salary_key = "above_5000"
+    else:
+        # fuzzy/fallback parsing
+        if "below 4000" in salary_raw or salary_raw.strip() == "below 4000 aed" or salary_raw.strip() == "below 4000":
+            salary_key = "below_4000"
+        elif "4000 - 5000" in salary_raw or "4000-5000" in salary_raw or "4000 to 5000" in salary_raw:
+            salary_key = "4000_5000"
+        elif "above 5000" in salary_raw or "more than 5000" in salary_raw or "5000+" in salary_raw or "5000 =" in salary_raw:
+            salary_key = "above_5000"
+
+    # final fallback: if salary contains digits, try to infer numerically
+    if salary_key is None and salary_raw:
+        digits = re.findall(r'\d+', salary_raw)
+        if digits:
+            nums = [int(d) for d in digits]
+            # take median-ish or first number
+            n = nums[0]
+            if n < 4000:
+                salary_key = "below_4000"
+            elif 4000 <= n <= 5000:
+                salary_key = "4000_5000"
+            elif n > 5000:
+                salary_key = "above_5000"
+
+    # Build products or message based on rules you requested
+    products = []
+    message = None
+
+    if place == "Dubai":
+        if salary_key == "below_4000":
+            # single demo product
+            products = [
+                {"name": "DHA-Basic", "price": "864.00", "plan": "NLSB"}
+            ]
+        elif salary_key in ("4000_5000", "above_5000"):
+            products = [
+                {"name": "DHA-Basic", "price": "1893.00", "plan": "LSB"},
+                {"name": "DHA-Basic", "price": "1893.00", "plan": "LSB"}
+            ]
+        else:
+            # salary unknown — give conservative suggestion
+            products = [
+                {"name": "DHA-Basic", "price": "1893.00", "plan": "LSB"}
+            ]
+
+    elif place == "Abu Dhabi":
+        if salary_key in ("below_4000", "4000_5000"):
+            message = "The minimum requirement for this product plan is above 5000 AED"
+        elif salary_key == "above_5000":
+            products = [
+                {"name": "Abu Dhabi Eligible Plan", "price": "1350.00 AED", "plan": "Premium"}
+            ]
+        else:
+            message = "Please ensure your salary is above 5000 AED to see available plans for Abu Dhabi."
+
+    else:
+        # unknown issuing place -> be conservative
+        if salary_key == "above_5000":
+            products = [
+                {"name": "General Plan (Eligible)", "price": "999.00 AED", "plan": "Standard"}
+            ]
+        else:
+            message = "We couldn't determine issuing place precisely. If you'd like, please confirm the issuing place (Dubai or Abu Dhabi)."
+
+    ask_mobile = not bool(session.mobile)
+
+    # In the emirates_id_upload function, update the product URL generation:
+    # In the emirates_id_upload function, update the product URL generation:
+    for p in products:
+        # Ensure URL is always a string and properly formatted
+        if "DHA-Basic" in p["name"]:
+            if p["plan"] == "NLSB":
+                p["url"] = "https://gia-insurance-provider.com/dha-basic-nlsb"
+            elif p["plan"] == "LSB":
+                p["url"] = "https://gia-insurance-provider.com/dha-basic-lsb"
+            else:
+                p["url"] = "https://gia-insurance-provider.com/dha-basic"
+        elif "Abu Dhabi" in p["name"]:
+            p["url"] = "https://gia-insurance-provider.com/abu-dhabi-premium"
+        else:
+            p["url"] = "https://gia-insurance-provider.com/general-plan"
+        
+        # Double-check URL format
+        if not p["url"].startswith(('http://', 'https://')):
+            p["url"] = "https://" + p["url"]
+
+    # --- Build response (include new keys) ---
+    resp_payload = {
         "ok": True,
         "id": record.id,
         "fields": {**front_data, **back_data},
@@ -652,8 +992,15 @@ def emirates_id_upload(request):
             "back": bool(back_texts)
         },
         "next_step": next_step,
-        "files_processed": len(processed_files)
-    })
+        "files_processed": len(processed_files),
+        # New keys consumed by front-end
+        "issuing_place_detected": place,
+        "products": products,
+        "message": message,
+        "ask_mobile": ask_mobile,
+    }
+
+    return JsonResponse(resp_payload)
 
 
 
@@ -845,7 +1192,7 @@ def fallback_to_fsm(session, user_text, user):
         if text in ["e", "employee"]:
             session.role = "Employee"
             reply = "What is your current monthly salary?"
-            options = ["Below 4000 AED", "4000-10000 AED", "Above 10000 AED"]
+            options = ["below 4000 AED", "4000 - 5000 AED", "above 5000 AED"]
             session.step = "q3"
         elif text in ["d", "depender"]:
             session.role = "Depender"
@@ -861,12 +1208,12 @@ def fallback_to_fsm(session, user_text, user):
         if text in ["s", "spouse"]:
             session.depender_type = "Spouse"
             reply = "What is your sponsor's current monthly salary?"
-            options = ["Below 4000 AED", "4000-10000 AED", "Above 10000 AED"]
+            options = ["below 4000 AED", "4000 - 5000 AED", "above 5000 AED"]
             session.step = "q3"
         elif text in ["c", "child"]:
             session.depender_type = "Child"
             reply = "What is your sponsor's current monthly salary?"
-            options = ["Below 4000 AED", "4000-10000 AED", "Above 10000 AED"]
+            options = ["below 4000 AED", "4000 - 5000 AED", "above 5000 AED"]
             session.step = "q3"
         else:
             reply = "Please select Spouse or Child."
@@ -1018,6 +1365,7 @@ def get_user_session_data(request):
             "name": emr.name,
             "dob": emr.dob,
             "issuing_date": emr.issuing_date,
+            "issuing_place": emr.issuing_place,
             "nationality": emr.nationality,
             "gender": emr.gender,
             "address": emr.address,
@@ -1234,3 +1582,185 @@ def get_user_chat_history(request, session_id=None):
         })
     
     return Response({'chat_sessions': sessions_data})
+
+
+
+@csrf_exempt
+def save_mobile(request):
+    import json
+    from django.http import JsonResponse
+    from .models import ChatSession, EmiratesIDRecord
+
+    data = json.loads(request.body.decode("utf-8"))
+    session_id = data.get("session_id")
+    mobile = data.get("mobile")
+
+    if not session_id or not mobile:
+        return JsonResponse({"error": "session_id and mobile required"}, status=400)
+
+    try:
+        session = ChatSession.objects.get(session_id=session_id)
+    except ChatSession.DoesNotExist:
+        return JsonResponse({"error": "Session not found"}, status=404)
+
+    # Save the mobile number
+    session.mobile = mobile
+    session.save(update_fields=["mobile"])
+
+    # ✅ Get related Emirates ID record
+    record = EmiratesIDRecord.objects.filter(chat_session=session).first()
+
+    # ✅ Compute product recommendations now that mobile is saved
+    products, message = compute_products_based_on_data(session, record)
+
+    response = {
+        "ok": True,
+        "message": f"Thanks! I've updated your mobile number to {mobile}.",
+        "products": products or [],
+        "info_message": message or None,
+    }
+
+    return JsonResponse(response)
+
+
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
+from .models import EmiratesIDRecord  # adjust model name if different
+
+@csrf_exempt
+def save_missing_field(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request"}, status=405)
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        record_id = data.get("record_id")
+        field_name = data.get("field_name")
+        value = data.get("value")
+
+        if not record_id or not field_name or not value:
+            return JsonResponse({"error": "Missing data"}, status=400)
+
+        record = EmiratesIDRecord.objects.get(id=record_id)
+        setattr(record, field_name, value)
+        record.save()
+
+        # Check if there are still missing fields
+        missing_fields = []
+        for f in ["mobile", "salary", "family_sponsor_name"]:  # adjust to your model
+            if not getattr(record, f, None):
+                missing_fields.append(f)
+
+        # If all fields filled, return products (or empty if none)
+        products = []
+        if not missing_fields:
+            products = [
+                {"name": "Standard Plan", "price": "AED 599", "plan": "Basic"},
+                {"name": "Gold Plan", "price": "AED 899", "plan": "Premium"},
+            ]
+
+        return JsonResponse({
+            "ok": True,
+            "next_missing_field": missing_fields[0] if missing_fields else None,
+            "products": products
+        })
+
+    except EmiratesIDRecord.DoesNotExist:
+        return JsonResponse({"error": "Record not found"}, status=404)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+import re
+
+def compute_products_based_on_data(session, record):
+    # Normalize issuing place (robust to common OCR errors)
+    issuing_raw = (record.issuing_place or "") if record else ""
+    issuing_norm = issuing_raw.strip().lower()
+
+    # canonicalize common OCR variations
+    place = None
+    if issuing_norm:
+        if ("abu" in issuing_norm and "dub" not in issuing_norm) or "adhabi" in issuing_norm or "adabi" in issuing_norm or "abudhabi" in issuing_norm or "abud" in issuing_norm:
+            place = "Abu Dhabi"
+        elif "duba" in issuing_norm or "dubai" in issuing_norm or "dubi" in issuing_norm:
+            place = "Dubai"
+        else:
+            if "abu dhabi" in issuing_norm:
+                place = "Abu Dhabi"
+            elif "dubai" in issuing_norm:
+                place = "Dubai"
+            else:
+                place = issuing_raw.strip().title() if issuing_raw else None
+
+    # Normalize salary selection from session
+    salary_raw = (session.salary or "").lower() if session else ""
+    salary_key = None
+
+    if "below" in salary_raw and "4000" in salary_raw:
+        salary_key = "below_4000"
+    elif "4000" in salary_raw and "5000" in salary_raw:
+        salary_key = "4000_5000"
+    elif "above" in salary_raw and ("5000" in salary_raw or "5000" in salary_raw):
+        salary_key = "above_5000"
+    else:
+        if "below 4000" in salary_raw or salary_raw.strip() == "below 4000 aed" or salary_raw.strip() == "below 4000":
+            salary_key = "below_4000"
+        elif "4000 - 5000" in salary_raw or "4000-5000" in salary_raw or "4000 to 5000" in salary_raw:
+            salary_key = "4000_5000"
+        elif "above 5000" in salary_raw or "more than 5000" in salary_raw or "5000+" in salary_raw or "5000 =" in salary_raw:
+            salary_key = "above_5000"
+
+    # final fallback: numeric inference
+    if salary_key is None and salary_raw:
+        digits = re.findall(r'\d+', salary_raw)
+        if digits:
+            nums = [int(d) for d in digits]
+            n = nums[0]
+            if n < 4000:
+                salary_key = "below_4000"
+            elif 4000 <= n <= 5000:
+                salary_key = "4000_5000"
+            elif n > 5000:
+                salary_key = "above_5000"
+
+    # Build products or message
+    products = []
+    message = None
+
+    if place == "Dubai":
+        if salary_key == "below_4000":
+            products = [
+                {"name": "DHA-Basic", "price": "864.00", "plan": "NLSB", "url": "https://gia-insurance-provider.com/dha-basic-nlsb"}
+            ]
+        elif salary_key in ("4000_5000", "above_5000"):
+            products = [
+                {"name": "DHA-Basic", "price": "864.00", "plan": "NLSB", "url": "https://gia-insurance-provider.com/dha-basic-nlsb"},
+                {"name": "DHA-Basic", "price": "1893.00", "plan": "LSB", "url": "https://gia-insurance-provider.com/dha-basic-lsb"}
+            ]
+        else:
+            products = [
+                {"name": "DHA-Basic", "price": "1893.00", "plan": "LSB", "url": "https://gia-insurance-provider.com/dha-basic-lsb"}
+            ]
+
+    elif place == "Abu Dhabi":
+        if salary_key in ("below_4000", "4000_5000"):
+            message = "The minimum requirement for this product plan is above 5000 AED"
+        elif salary_key == "above_5000":
+            products = [
+                {"name": "Abu Dhabi Eligible Plan", "price": "1350.00 AED", "plan": "Premium", "url": "https://gia-insurance-provider.com/abu-dhabi-premium"}
+            ]
+        else:
+            message = "Please ensure your salary is above 5000 AED to see available plans for Abu Dhabi."
+
+    else:
+        if salary_key == "above_5000":
+            products = [
+                {"name": "General Plan (Eligible)", "price": "999.00 AED", "plan": "Standard", "url": "https://gia-insurance-provider.com/general-plan"}
+            ]
+        else:
+            message = "We couldn't determine issuing place precisely. If you'd like, please confirm the issuing place (Dubai or Abu Dhabi)."
+
+    return products, message
