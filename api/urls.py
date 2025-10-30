@@ -14,4 +14,6 @@ urlpatterns = [
     path('auth/send-otp/', views.send_otp, name='send_otp'),
     path('auth/verify-otp/', views.verify_otp, name='verify_otp'),
     path('auth/chat-history/', views.get_user_chat_history, name='get_chat_history'),
+    path("api/save-missing-field/", views.save_missing_field, name="save_missing_field"),
+    path("save-mobile/", views.save_mobile, name="save_mobile"),
 ]
