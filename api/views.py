@@ -1852,9 +1852,11 @@ from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 from mindee import ClientV2, InferenceParameters, BytesInput
 import re
+from rest_framework.permissions import AllowAny
 
 @csrf_exempt
-@require_POST
+@api_view(['POST'])
+@permission_classes([AllowAny])
 def passport_upload(request):
     
     try:
