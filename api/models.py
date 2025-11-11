@@ -139,3 +139,18 @@ class PassportRecord(models.Model):
 
     def __str__(self):
         return f"{self.passport_number or 'No Passport'} - {self.name or 'Unknown'}"
+
+
+class UAEDocumentVisa(models.Model):
+    id_number = models.CharField(max_length=50, null=True, blank=True)
+    file_number = models.CharField(max_length=50, null=True, blank=True)
+    passport_no = models.CharField(max_length=50, null=True, blank=True)
+    employer_name = models.CharField(max_length=200, null=True, blank=True)
+    uid_no = models.CharField(max_length=50, null=True, blank=True)
+    issuing_date = models.CharField(max_length=50, null=True, blank=True)
+    expiry_date = models.CharField(max_length=50, null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    raw_text = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"UAE Visa ({self.file_number or 'N/A'})"
