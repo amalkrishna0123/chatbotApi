@@ -25,6 +25,7 @@ class ChatSession(models.Model):
     role = models.CharField(max_length=20, blank=True, null=True)            
     salary = models.CharField(max_length=64, blank=True, null=True)
     depender_type = models.CharField(max_length=20, blank=True, null=True)
+    depender_name = models.CharField(max_length=255, blank=True, null=True)  # NEW FIELD
     
     # NEW FIELDS for OpenAI dynamic flow
     full_name = models.CharField(max_length=255, blank=True, null=True)
@@ -33,6 +34,7 @@ class ChatSession(models.Model):
     expiry = models.CharField(max_length=32, blank=True, null=True)
     nationality = models.CharField(max_length=128, blank=True, null=True)
     occupation = models.CharField(max_length=128, blank=True, null=True)
+    mobile = models.CharField(max_length=20, blank=True, null=True)
     emirates_id_uploaded = models.BooleanField(default=False)
     
     updated_at = models.DateTimeField(auto_now=True) 
@@ -105,3 +107,35 @@ class EmiratesIDRecord(models.Model):
 
     def __str__(self):
         return f"{self.emirates_id or 'No ID'} - {self.name or 'Unknown'}"
+
+
+# Passport Record Model
+class PassportRecord(models.Model):
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+    chat_session = models.OneToOneField(
+        ChatSession, on_delete=models.CASCADE, related_name='passport_record',
+        blank=True, null=True
+    )
+    passport_number = models.CharField(max_length=32, blank=True, null=True, db_index=True)
+    name = models.CharField(max_length=256, blank=True, null=True)
+    given_name = models.CharField(max_length=256, blank=True, null=True)  # First name
+    surname = models.CharField(max_length=256, blank=True, null=True)  # Last name
+    dob = models.CharField(max_length=32, blank=True, null=True)
+    nationality = models.CharField(max_length=128, blank=True, null=True)
+    gender = models.CharField(max_length=16, blank=True, null=True)
+    place_of_birth = models.CharField(max_length=256, blank=True, null=True)
+    date_of_issue = models.CharField(max_length=32, blank=True, null=True)
+    date_of_expiry = models.CharField(max_length=32, blank=True, null=True)
+    issuing_authority = models.CharField(max_length=128, blank=True, null=True)
+    passport_type = models.CharField(max_length=16, blank=True, null=True)  # P, D, etc.
+    is_valid = models.BooleanField(default=False)  # Validation result
+    validation_message = models.TextField(blank=True, null=True)  # Validation details
+    name_match = models.BooleanField(default=False)  # Does name match Emirates ID
+    expiry_valid = models.BooleanField(default=False)  # Is passport not expired
+    raw_response = models.JSONField(blank=True, null=True)
+    status = models.CharField(max_length=32, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.passport_number or 'No Passport'} - {self.name or 'Unknown'}"
