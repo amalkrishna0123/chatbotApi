@@ -1852,9 +1852,12 @@ from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 from mindee import ClientV2, InferenceParameters, BytesInput
 import re
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 
 @csrf_exempt
-@require_POST
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def passport_upload(request):
     
     try:
@@ -2159,7 +2162,8 @@ def parse_uae_visa_fields(text: str):
 
 
 @csrf_exempt
-@require_POST
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def uae_visa_upload(request):
     """
     Handles UAE Visa uploads (image/pdf) using OCR.space API.
