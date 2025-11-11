@@ -1350,7 +1350,8 @@ def fallback_to_fsm(session, user_text, user):
 
 # views.py - Update the update_emirates_id_record function
 @csrf_exempt
-@require_POST
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def update_emirates_id_record(request):
     import json
     payload = json.loads(request.body.decode("utf-8"))
