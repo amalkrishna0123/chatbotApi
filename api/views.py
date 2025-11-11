@@ -1852,12 +1852,9 @@ from django.views.decorators.http import require_POST
 from django.http import JsonResponse
 from mindee import ClientV2, InferenceParameters, BytesInput
 import re
-from rest_framework.permissions import AllowAny
-from rest_framework.decorators import api_view, permission_classes
 
 @csrf_exempt
-@api_view(['POST'])
-@permission_classes([AllowAny])
+@require_POST
 def passport_upload(request):
     
     try:
@@ -1989,3 +1986,225 @@ def passport_upload(request):
         # Do not leak stack traces to clients
         return JsonResponse({"error": f"OCR failed: {str(e)}"}, status=500)
 
+
+
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
+from .ocr_space import ocr_space_file_multi_lang, ocr_space_pdf_all_pages
+from .models import UAEDocumentVisa
+import re
+
+import re
+
+def parse_uae_visa_fields(text: str):
+    """
+    Extracts fields from UAE Visa OCR text.
+    Fields: ID Number, File Number, Passport No, Employer, UID No, Issue/Expiry Dates
+    """
+    data = {}
+    if not text:
+        return data
+
+    raw = text
+    t = re.sub(r'[ \t]+', ' ', raw).replace('\r', '\n')
+
+    def clean(v):
+        v = v.strip()
+        v = re.sub(r'^[\:\-\|\/\s]+', '', v)
+        v = re.sub(r'[\s\|]+$', '', v)
+        return v.strip()
+
+    # ID Number
+    id_match = re.search(r'(?i)(?:ID\s*Number|ID\s*No\.?|رقم\s*الهوية)\s*[:\-]?\s*([0-9\-]{10,25})', t)
+    if not id_match:
+        id_match = re.search(r'\b(784\d{9,12})\b', t)
+    if id_match:
+        data['id_number'] = clean(id_match.group(1))
+
+    # File Number
+    file_match = re.search(r'(?i)(?:File\s*Number|File\s*No\.?|رقم\s*الملف)\s*[:\-]?\s*([0-9\/\-]{8,25})', t)
+    if not file_match:
+        # Sometimes file number looks like 101/2023/1234567 without label
+        file_match = re.search(r'(\b\d{3,5}\/\d{4}\/\d{5,8}\b)', t)
+    if file_match:
+        data['file_number'] = clean(file_match.group(1))
+
+    # ---------------- Passport Number ----------------
+    # must contain at least one digit, typical UAE passports like Z5561532
+    pass_match = re.search(
+        r'(?i)(?:Passport\s*No\.?|Passport\s*Number|رقم\s*الجواز)\s*[:\-]?\s*((?=[A-Z0-9]*\d)[A-Z0-9]{5,12})',
+        t
+    )
+    passport_val = None
+    if pass_match:
+        passport_val = clean(pass_match.group(1))
+    else:
+        # Fallback: any token 6–12 chars with letters+digits
+        candidates = re.findall(r'\b(?=[A-Z0-9]*\d)[A-Z0-9]{6,12}\b', t)
+        for val in candidates:
+            # Prefer letter-first combos like Z5561532
+            if re.match(r'^[A-Z][A-Z0-9]*\d', val):
+                passport_val = val
+                break
+        if not passport_val and candidates:
+            passport_val = candidates[0]
+
+    if passport_val:
+        data['passport_no'] = passport_val
+
+    # ---------------- UID No (if present) ----------------
+    uid_match = re.search(r'(?i)(?:UID\s*(?:No\.?|Number)?|Unified\s*Number|الرقم\s*الموحد)\s*[:\-]?\s*([0-9]{8,15})', t)
+    if uid_match:
+        data['uid_no'] = clean(uid_match.group(1))
+
+    # ---------------- Name (Visa Holder) - IMPROVED ----------------
+    # Strategy: Find name between passport number and profession/employer keywords
+    # Look for pattern: after passport number, before HOUSE WIFE/Profession/Employer
+    
+    name_val = None
+    
+    # Pattern 1: Name appears after passport number line, before profession keywords
+    # Match 2-4 uppercase words that form a person's name
+    name_match = re.search(
+        r'(?i)(?:Passport\s*No\.?|رقم\s*الجواز)[^\n]*\n\s*([A-Z][A-Z\s]{8,60}?)\s*(?=\n|HOUSE\s*WIFE|Profession|Employer|المهنة|الوظيفة)',
+        t
+    )
+    
+    if name_match:
+        name_val = clean(name_match.group(1))
+    
+    # Pattern 2: Look for Arabic name pattern followed by English name
+    if not name_val:
+        # Match pattern like "شابين شرجي راشد\nSHEBIN SHERJI RASHEED"
+        name_match = re.search(
+            r'[\u0600-\u06FF\s]+\n\s*([A-Z][A-Z\s]{8,60}?)\s*(?=\n|HOUSE\s*WIFE|Profession)',
+            t
+        )
+        if name_match:
+            name_val = clean(name_match.group(1))
+    
+    # Pattern 3: Find uppercase name before profession keywords
+    if not name_val:
+        name_match = re.search(
+            r'\b([A-Z]{3,}(?:\s+[A-Z]{3,}){1,3})\s*(?=\n|HOUSE\s*WIFE|Profession|Employer)',
+            t
+        )
+        if name_match:
+            name_val = clean(name_match.group(1))
+    
+    # Clean and validate the extracted name
+    if name_val:
+        # Remove any trailing junk
+        name_val = re.sub(r'\s*(ame|Profession|HOUSE\s*WIFE|Employer).*$', '', name_val, flags=re.IGNORECASE)
+        name_val = clean(name_val)
+        
+        # Validate: should be 2-4 words, each at least 2 chars, no common false positives
+        words = name_val.split()
+        excluded_words = {'UNITED', 'ARAB', 'EMIRATES', 'HOUSE', 'WIFE', 'PROFESSION', 'EMPLOYER', 'PASSPORT', 'NUMBER'}
+        
+        if (2 <= len(words) <= 4 and 
+            all(len(w) >= 2 for w in words) and 
+            not any(w.upper() in excluded_words for w in words)):
+            data['employer_name'] = name_val
+
+
+
+
+    # ---------------- Dates: Issue / Expiry ----------------
+    date_rx = r'(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})'
+
+    def normalize_date(s: str) -> str:
+        s = clean(s).replace('-', '/')
+        parts = s.split('/')
+        if len(parts) == 3:
+            if len(parts[0]) == 4:   # YYYY/MM/DD
+                y, m, d = parts
+            else:                    # DD/MM/YYYY
+                d, m, y = parts
+                if len(y) == 2:
+                    y = f"{2000+int(y):04d}" if int(y) < 30 else f"{1900+int(y):04d}"
+            try:
+                return f"{int(y):04d}/{int(m):02d}/{int(d):02d}"
+            except:
+                return s
+        return s
+
+    # labeled first, English + Arabic, allow a bit of junk between label and digits
+    issue_match = re.search(r'(?i)(?:Issu(?:e|ing)\s*Date|Date\s*of\s*Issue|تاريخ\s*الإصدار)[^\d]{0,12}' + date_rx, t)
+    exp_match   = re.search(r'(?i)(?:Expiry\s*Date|Expires|تاريخ\s*الانتهاء)[^\d]{0,12}' + date_rx, t)
+
+    if issue_match:
+        data['issuing_date'] = normalize_date(issue_match.group(1))
+    if exp_match:
+        data['expiry_date'] = normalize_date(exp_match.group(1))
+
+    # fallback: pick earliest and latest reasonable dates in the text
+    if 'issuing_date' not in data or 'expiry_date' not in data:
+        all_dates = [normalize_date(d) for d in re.findall(date_rx, t)]
+        # keep only sane years
+        def year_ok(ds):
+            try:
+                y = int(ds.split('/')[0])
+                return 2000 <= y <= 2100
+            except:
+                return False
+        cand = sorted(set([d for d in all_dates if year_ok(d)]))
+        if cand:
+            data.setdefault('issuing_date', cand[0])
+            data.setdefault('expiry_date', cand[-1])
+
+    return data
+
+
+
+@csrf_exempt
+@require_POST
+def uae_visa_upload(request):
+    """
+    Handles UAE Visa uploads (image/pdf) using OCR.space API.
+    """
+    f = request.FILES.get('file')
+    if not f:
+        return JsonResponse({"error": "No file uploaded"}, status=400)
+
+    name = (f.name or "").lower()
+    is_pdf = name.endswith(".pdf") or (f.content_type == "application/pdf")
+
+    # OCR process
+    if is_pdf:
+        text, code, err = ocr_space_pdf_all_pages(f)
+    else:
+        text, code, err = ocr_space_file_multi_lang(f, False)
+
+    if code != 0:
+        return JsonResponse({"error": f"OCR failed: {err or 'unknown error'}"}, status=500)
+
+    fields = parse_uae_visa_fields(text or "")
+
+    # Save record
+    record = UAEDocumentVisa.objects.create(
+        id_number=fields.get("id_number"),
+        file_number=fields.get("file_number"),
+        passport_no=fields.get("passport_no"),
+        employer_name=fields.get("employer_name"),
+        uid_no=fields.get("uid_no"),
+        issuing_date=fields.get("issuing_date"),
+        expiry_date=fields.get("expiry_date"),
+        raw_text=text
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "record_id": record.id,
+        "fields": {
+            "id_number": record.id_number,
+            "file_number": record.file_number,
+            "passport_no": record.passport_no,
+            "employer_name": record.employer_name,
+            "uid_no": record.uid_no,
+            "issuing_date": record.issuing_date,
+            "expiry_date": record.expiry_date,
+        },
+        "raw_text": record.raw_text[:2000]  # print trimmed full OCR result
+    }, status=200)
