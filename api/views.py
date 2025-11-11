@@ -13,7 +13,7 @@ import tempfile
 from django.views.decorators.http import require_POST
 # from .models import EmiratesIDRecord
 from pdf2image import convert_from_path
-from .models import ChatSession, EmiratesIDRecord
+from .models import ChatSession, EmiratesIDRecord, PassportRecord
 import uuid
 
 import random
@@ -28,8 +28,19 @@ from django.views.decorators.csrf import csrf_exempt
 from .models import ChatSession, ChatMessage
 from .ocr_space import ocr_space_file
 
+import io, hashlib, tempfile, re, math, json
+from datetime import datetime, date
+from django.core.cache import cache
+from PIL import Image, ImageOps
+import numpy as np
 
-client = OpenAI(api_key="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")
+# OpenCV + OCR stacks
+import cv2
+import easyocr
+from passporteye import read_mrz
+from pdf2image import convert_from_bytes
+
+client = OpenAI(api_key="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")
 
 SERVICE_ACCOUNT_FILE = r"C:\Users\GL_Amal\OneDrive\Desktop\AMAL KRISHNA\ChatBot - Copy\chatbot_project\backend\chatbot.json"
 
@@ -63,9 +74,11 @@ INSURANCE_ONBOARDING_SYSTEM_PROMPT = (
     " - When the user answers, set that field in session_updates.\n"
     " - Once all REQUIRED_FIELDS are filled, continue to sponsor question before completing.\n\n"
 
-    "Allowed step values: start, q1, q2, q2a, q3, salary_q, sponsor_q, awaiting_id_frontside, awaiting_id_backside, complete.\n"
+    "Allowed step values: start, q1, q2, q2a, q3, salary_q, sponsor_q, awaiting_id_frontside, awaiting_id_backside, awaiting_passport, passport_verified, passport_validation_failed, complete.\n"
     "Session fields you may update: step, looking_for_insurance, role, depender_type, salary, "
     "emirates_id_uploaded, is_completed, full_name, emirates_id_number, dob, expiry, nationality, occupation, sponsor_name.\n\n"
+    # "IMPORTANT FLOW: After products are displayed and user selects a product, you must ask for passport upload.\n"
+    # "Set session_updates.step='awaiting_passport' and ask: 'Please upload your passport (front and back pages or PDF with both pages).'\n\n"
 
     "### Few-shot examples ###\n\n"
 
@@ -931,7 +944,7 @@ def emirates_id_upload(request):
             ]
         elif salary_key in ("4000_5000", "above_5000"):
             products = [
-                {"name": "DHA-Basic", "price": "1893.00", "plan": "LSB"},
+                {"name": "DHA-Basic", "price": "864.00", "plan": "NLSB"},
                 {"name": "DHA-Basic", "price": "1893.00", "plan": "LSB"}
             ]
         else:
@@ -1091,6 +1104,43 @@ def insurance_chat(request):
         
         context["emirates_id_data"] = emirates_id_data
 
+        # ✅ SPECIAL HANDLING: If passport is verified, compute and return products directly
+        if session.step == "passport_verified":
+            try:
+                record = EmiratesIDRecord.objects.filter(chat_session=session).first()
+                products, message = compute_products_based_on_data(session, record)
+                
+                # Save message if user sent text
+                if user_text:
+                    ChatMessage.objects.create(session=session, role="user", content=user_text)
+                
+                # Prepare product response
+                reply = "Based on your Emirates ID and salary, here are the available products:"
+                if message:
+                    reply = message
+                
+                # If products found, return them
+                if products and len(products) > 0:
+                    return JsonResponse({
+                        "reply": reply,
+                        "options": [],
+                        "session_id": session.session_id,
+                        "step": session.step,
+                        "products": products
+                    })
+                else:
+                    # No products available
+                    return JsonResponse({
+                        "reply": reply or "No products available at this time.",
+                        "options": [],
+                        "session_id": session.session_id,
+                        "step": session.step,
+                        "products": []
+                    })
+            except Exception as e:
+                print(f"Error computing products after passport verification: {e}")
+                # Fall through to normal flow if error
+
         # Prepare messages for OpenAI
         messages_for_openai = [
             {"role": "system", "content": INSURANCE_ONBOARDING_SYSTEM_PROMPT},
@@ -1229,6 +1279,35 @@ def fallback_to_fsm(session, user_text, user):
 
     elif step == "awaiting_id_backside":
         reply = "I see you're trying to upload an Emirates ID. Please use the file upload button to submit the back side of your Emirates ID."
+
+    elif step == "passport_verified":
+        # ✅ After passport verification, compute and return products
+        try:
+            record = EmiratesIDRecord.objects.filter(chat_session=session).first()
+            products, message = compute_products_based_on_data(session, record)
+            
+            reply = "Based on your Emirates ID and salary, here are the available products:"
+            if message:
+                reply = message
+            options = []
+            
+            # Return products in response (will be handled by caller)
+            session.save()
+            if user_text:
+                ChatMessage.objects.create(session=session, role="user", content=user_text)
+            if reply:
+                ChatMessage.objects.create(session=session, role="bot", content=reply)
+            
+            return JsonResponse({
+                "reply": reply,
+                "options": options,
+                "session_id": session.session_id,
+                "step": session.step,
+                "products": products or []
+            })
+        except Exception as e:
+            reply = f"Sorry, there was an error fetching products. Error: {str(e)}"
+            options = []
 
     elif step == "complete":
         # Free chat mode with original SYSTEM_PROMPT
@@ -1627,7 +1706,7 @@ def save_mobile(request):
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
-from .models import EmiratesIDRecord  # adjust model name if different
+from .models import EmiratesIDRecord, PassportRecord  # adjust model name if different
 
 @csrf_exempt
 def save_missing_field(request):
@@ -1764,3 +1843,146 @@ def compute_products_based_on_data(session, record):
             message = "We couldn't determine issuing place precisely. If you'd like, please confirm the issuing place (Dubai or Abu Dhabi)."
 
     return products, message
+
+
+
+# -------------------- Mindee Passport Upload (Testing Version) --------
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
+from mindee import ClientV2, InferenceParameters, BytesInput
+import re
+
+@csrf_exempt
+@require_POST
+def passport_upload(request):
+    
+    try:
+        uploaded = request.FILES.get("file")
+        if not uploaded:
+            return JsonResponse({"error": "No file uploaded"}, status=400)
+
+        # Prefer env, fall back to your test keys so nothing breaks while you tinker
+        api_key = os.getenv("MINDEE_API_KEY", "md_bqhpQSjYVJUmdydlOHoc9TBDEbqkfuSs")
+        model_id = os.getenv("MINDEE_PASSPORT_MODEL_ID", "a534a5a4-47ca-481e-924e-c9ea69f693dd")
+
+        client = ClientV2(api_key)
+        params = InferenceParameters(model_id=model_id, confidence=True)
+
+        # Read uploaded file bytes
+        input_source = BytesInput(uploaded.read(), filename=uploaded.name)
+
+        # OCR
+        response = client.enqueue_and_get_inference(input_source, params)
+        fields = response.inference.result.fields  # dict-like
+
+        # Helpers -------------------------------------------------------------
+
+        def value_of(field_obj):
+            """
+            Mindee returns either raw strings or objects with .value.
+            Return a clean string or None.
+            """
+            if field_obj is None:
+                return None
+            v = getattr(field_obj, "value", field_obj)
+            if v is None:
+                return None
+            s = str(v).strip()
+            return s if s else None
+
+        def get_any(keys):
+            for k in keys:
+                if k in fields:
+                    v = value_of(fields[k])
+                    if v:
+                        return v
+            return None
+
+        def normalize_date(s):
+            if not s:
+                return None
+            s = str(s).strip()
+            # Mindee commonly returns YYYY-MM-DD
+            m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
+            if m:
+                y, mm, dd = m.groups()
+                return f"{dd}/{mm}/{y}"
+            return s
+
+        def _collapse_spaces(txt):
+            return re.sub(r"\s+", " ", txt).strip()
+
+        def parse_names_from_mrz(mrz_line_1):
+            """
+            MRZ line 1 format (with OCR glitches):
+            'P<ISSUER[SURNAME]<<GIVEN<NAMES<<<<'
+            Real world often has '<' misread as 'A', so handle that too.
+            Returns (surname, given_names) or (None, None).
+            """
+            if not mrz_line_1:
+                return None, None
+
+            line = mrz_line_1.upper()
+            # Normalize common OCR misreads of the filler char
+            line = line.replace("«", "<")
+            # Strip the 'P<ISO' header, but tolerate OCR 'PA' for '<'
+            # Examples: 'P<GBR', 'PAISL', 'P<USA'
+            line_no_hdr = re.sub(r"^P[<A][A-Z]{3}", "", line)
+
+            # Split surname and given names by the primary separator
+            parts = line_no_hdr.split("<<", 1)
+            if len(parts) != 2:
+                return None, None
+
+            raw_surname, raw_given = parts[0], parts[1]
+
+            # Replace MRZ fillers with spaces, collapse runs
+            surname = _collapse_spaces(raw_surname.replace("<", " "))
+            # Given names may contain additional '<<' segments we ignore
+            given = _collapse_spaces(raw_given.split("<<", 1)[0].replace("<", " "))
+
+            return (surname or None), (given or None)
+
+        # --------------------------------------------------------------------
+
+        passport_number = get_any(["passport_number", "PassportNumber", "Document Number"])
+        dob = normalize_date(get_any(["date_of_birth", "Date of Birth", "DOB"]))
+
+        # Prefer Mindee's plural keys first, then common alternates
+        given_name = get_any([
+            "given_names", "given_name", "Given Names", "Given Name",
+            "first_names", "first_name", "forenames", "forename", "given"
+        ])
+        surname = get_any([
+            "surnames", "surname", "Surname", "Last Name",
+            "family_name", "family_names", "lastname"
+        ])
+
+        # Fallback via MRZ if any name is missing
+        if not given_name or not surname:
+            mrz1 = get_any(["mrz_line_1", "mrz1", "MRZ Line 1"])
+            parsed_surname, parsed_given = parse_names_from_mrz(mrz1)
+            surname = surname or parsed_surname
+            given_name = given_name or parsed_given
+
+        full_name = _collapse_spaces(f"{given_name or ''} {surname or ''}")
+
+        return JsonResponse({
+            "fields": {
+                "passport_number": passport_number,
+                "given_name": given_name,  # keep singular for your UI
+                "surname": surname,
+                "name": full_name,
+                "dob": dob
+            },
+            "validation": {
+                "is_valid": all([passport_number, full_name, dob]),
+                "validation_message": "Successfully extracted passport details"
+            }
+        }, status=200)
+
+    except Exception as e:
+        # Do not leak stack traces to clients
+        return JsonResponse({"error": f"OCR failed: {str(e)}"}, status=500)
+
