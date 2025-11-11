@@ -18,4 +18,5 @@ urlpatterns = [
     path("save-mobile/", views.save_mobile, name="save_mobile"),
     # path("passport/", views.passport_upload, name="passport_upload"),
     path("passport/", views.passport_upload, name="passport_upload"),
+    path("uae-visa/", views.uae_visa_upload, name="uae_visa_upload"),
 ]
