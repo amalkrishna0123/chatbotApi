@@ -686,7 +686,8 @@ from django.views.decorators.http import require_POST
 import re
 
 @csrf_exempt
-@require_POST
+@api_view(["POST"])
+@permission_classes([AllowAny])
 def emirates_id_upload(request):
     """
     Multi-file front/back upload using OCR.space.
