@@ -684,6 +684,10 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 import re
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from django.http import JsonResponse
 
 @csrf_exempt
 @api_view(["POST"])
@@ -1346,6 +1350,10 @@ def fallback_to_fsm(session, user_text, user):
         "step": session.step
     })
 
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from django.http import JsonResponse
 
 
 # views.py - Update the update_emirates_id_record function
