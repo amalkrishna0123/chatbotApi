@@ -19,4 +19,5 @@ urlpatterns = [
     # path("passport/", views.passport_upload, name="passport_upload"),
     path("passport/", views.passport_upload, name="passport_upload"),
     path("uae-visa/", views.uae_visa_upload, name="uae_visa_upload"),
+    path("emirates-id-test/", views.emirates_id_upload_test, name="emirates_id_upload_test"),
 ]
