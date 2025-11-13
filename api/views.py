@@ -2222,3 +2222,62 @@ def uae_visa_upload(request):
         },
         "raw_text": record.raw_text[:2000]  # print trimmed full OCR result
     }, status=200)
+
+
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from django.http import JsonResponse
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def emirates_id_upload_test(request):
+    """
+    Global Emirates ID OCR test.
+    Returns ONLY essential fields requested by the user.
+    """
+    from .ocr_space import ocr_space_file_multi_lang
+
+    files = request.FILES.getlist("file")
+    if not files:
+        return JsonResponse({"error": "No files received"}, status=400)
+
+    combined_text = ""
+    for file_obj in files:
+        is_pdf = file_obj.name.lower().endswith(".pdf")
+        text, code, err = ocr_space_file_multi_lang(file_obj, is_pdf)
+
+        if code != 0:
+            return JsonResponse({"error": f"OCR failed: {err}"}, status=500)
+
+        combined_text += " " + text
+
+    # Extract data using your original logic
+    front_fields = parse_fields(combined_text)
+
+    try:
+        back_fields = parse_back_side_fields(combined_text)
+    except:
+        back_fields = {}
+
+    merged = {**front_fields, **back_fields}
+
+    # FILTERED FINAL OUTPUT (Only fields you want)
+    filtered = {
+        "emirates_id": merged.get("emirates_id"),
+        "name": merged.get("name"),
+        "dob": merged.get("dob"),
+        "expiry_date": merged.get("expiry_date"),
+        "issuing_date": merged.get("issuing_date"),
+        "nationality": merged.get("nationality"),
+        "gender": merged.get("gender"),
+        "occupation": merged.get("occupation"),
+        "employer": merged.get("employer"),
+        "issuing_place": merged.get("issuing_place"),
+    }
+
+    return JsonResponse({
+        "ok": True,
+        "fields": filtered,
+    })
